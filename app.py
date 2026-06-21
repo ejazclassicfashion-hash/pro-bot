@@ -90,51 +90,61 @@ def stat_badge(label, value, color=None):
     ], style={"textAlign": "center", "padding": "12px 20px"})
 
 
-# ── Main layout ───────────────────────────────────────────────────────────────
-app.layout = html.Div(style={"background": COLORS["bg"], "minHeight": "100vh",
-                              "fontFamily": "monospace", "color": COLORS["text"]}, children=[
+TAB_STYLE = {"color": COLORS["muted"], "background": COLORS["panel"],
+             "border": "none", "padding": "12px 28px", "fontFamily": "monospace"}
+TAB_SEL   = {"color": COLORS["green"], "background": COLORS["bg"],
+             "borderTop": f"2px solid {COLORS['green']}", "border": "none",
+             "padding": "12px 28px", "fontFamily": "monospace"}
 
-    # Header
-    html.Div([
+
+# ── Layout defined as function so body functions are available ────────────────
+def make_layout():
+    return html.Div(
+    style={"background": COLORS["bg"], "minHeight": "100vh",
+           "fontFamily": "monospace", "color": COLORS["text"]},
+    children=[
+        # Header
         html.Div([
-            html.Span("PRO BOT", style={"fontSize": "22px", "fontWeight": "bold",
-                                         "color": COLORS["green"]}),
-            html.Span("  |  Breakout+Retest  |  Paper Trading",
-                      style={"color": COLORS["muted"], "fontSize": "14px"}),
-        ], style={"display": "flex", "alignItems": "center", "gap": "8px"}),
-        html.Div(id="live-clock", style={"color": COLORS["muted"], "fontSize": "13px"}),
-    ], style={"background": COLORS["panel"], "borderBottom": f"1px solid {COLORS['border']}",
-              "padding": "14px 28px", "display": "flex",
-              "justifyContent": "space-between", "alignItems": "center"}),
+            html.Div([
+                html.Span("PRO BOT", style={"fontSize": "22px", "fontWeight": "bold",
+                                             "color": COLORS["green"]}),
+                html.Span("  |  Breakout+Retest  |  Paper Trading",
+                          style={"color": COLORS["muted"], "fontSize": "14px"}),
+            ], style={"display": "flex", "alignItems": "center", "gap": "8px"}),
+            html.Div(id="live-clock", style={"color": COLORS["muted"], "fontSize": "13px"}),
+        ], style={"background": COLORS["panel"],
+                  "borderBottom": f"1px solid {COLORS['border']}",
+                  "padding": "14px 28px", "display": "flex",
+                  "justifyContent": "space-between", "alignItems": "center"}),
 
-    # Tabs
-    dcc.Tabs(id="tabs", value="screener", style={"background": COLORS["panel"]},
-             colors={"border": COLORS["border"], "primary": COLORS["green"],
-                     "background": COLORS["panel"]},
-             children=[
-        dcc.Tab(label="Screener",     value="screener",  style={"color": COLORS["muted"]},
-                selected_style={"color": COLORS["green"], "background": COLORS["bg"],
-                                "borderTop": f"2px solid {COLORS['green']}"}),
-        dcc.Tab(label="Portfolio",    value="portfolio", style={"color": COLORS["muted"]},
-                selected_style={"color": COLORS["green"], "background": COLORS["bg"],
-                                "borderTop": f"2px solid {COLORS['green']}"}),
-        dcc.Tab(label="Live Signals", value="live",      style={"color": COLORS["muted"]},
-                selected_style={"color": COLORS["green"], "background": COLORS["bg"],
-                                "borderTop": f"2px solid {COLORS['green']}"}),
-        dcc.Tab(label="Chart",        value="chart",     style={"color": COLORS["muted"]},
-                selected_style={"color": COLORS["green"], "background": COLORS["bg"],
-                                "borderTop": f"2px solid {COLORS['green']}"}),
-    ]),
+        # Tab bar
+        dcc.Tabs(id="tabs", value="screener",
+                 style={"background": COLORS["panel"]},
+                 colors={"border": COLORS["border"], "primary": COLORS["green"],
+                         "background": COLORS["panel"]},
+                 children=[
+            dcc.Tab(label="Screener",     value="screener",  style=TAB_STYLE, selected_style=TAB_SEL),
+            dcc.Tab(label="Portfolio",    value="portfolio", style=TAB_STYLE, selected_style=TAB_SEL),
+            dcc.Tab(label="Live Signals", value="live",      style=TAB_STYLE, selected_style=TAB_SEL),
+            dcc.Tab(label="Chart",        value="chart",     style=TAB_STYLE, selected_style=TAB_SEL),
+        ]),
 
-    html.Div(id="tab-content", style={"padding": "24px 28px"}),
+        # All tab bodies — pre-rendered, show/hide with display
+        html.Div(style={"padding": "24px 28px"}, children=[
+            html.Div(id="pane-screener", children=screener_body()),
+            html.Div(id="pane-portfolio", children=portfolio_body()),
+            html.Div(id="pane-live",      children=live_body()),
+            html.Div(id="pane-chart",     children=chart_body()),
+        ]),
 
-    # Intervals
-    dcc.Interval(id="clock-tick",    interval=1000,        n_intervals=0),
-    dcc.Interval(id="signal-tick",   interval=60*60*1000,  n_intervals=0),  # 1hr
-    dcc.Store(id="screener-store"),
-    dcc.Store(id="portfolio-store"),
-    dcc.Store(id="signal-store"),
-])
+        # Intervals + stores
+        dcc.Interval(id="clock-tick",  interval=1000,       n_intervals=0),
+        dcc.Interval(id="auto-scan",   interval=3600*1000,  n_intervals=0),
+        dcc.Store(id="screener-store", storage_type="memory"),
+    ]
+)
+
+app.layout = make_layout
 
 
 # ── Clock ─────────────────────────────────────────────────────────────────────
@@ -143,20 +153,24 @@ def update_clock(_):
     return datetime.now(timezone.utc).strftime("UTC  %Y-%m-%d  %H:%M:%S")
 
 
-# ── Tab router ───────────────────────────────────────────────────────────────
-@app.callback(Output("tab-content", "children"), Input("tabs", "value"))
-def render_tab(tab):
-    if tab == "screener":  return screener_layout()
-    if tab == "portfolio": return portfolio_layout()
-    if tab == "live":      return live_layout()
-    if tab == "chart":     return chart_layout()
-    return html.Div("Unknown tab")
+# ── Tab show/hide — content stays in DOM, only visibility changes ─────────────
+PANES = ["screener", "portfolio", "live", "chart"]
+
+@app.callback(
+    [Output(f"pane-{p}", "style") for p in PANES],
+    Input("tabs", "value"),
+)
+def switch_tab(active):
+    return [
+        {"display": "block"} if p == active else {"display": "none"}
+        for p in PANES
+    ]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SCREENER TAB
 # ══════════════════════════════════════════════════════════════════════════════
-def screener_layout():
+def screener_body():
     return html.Div([
         card([
             html.Div([
@@ -309,7 +323,7 @@ def run_screener_cb(n_clicks, candles):
 # ══════════════════════════════════════════════════════════════════════════════
 # PORTFOLIO TAB
 # ══════════════════════════════════════════════════════════════════════════════
-def portfolio_layout():
+def portfolio_body():
     return html.Div([
         card([
             html.Div([
@@ -377,17 +391,25 @@ def run_portfolio_cb(_, pairs, candles):
                 pair_stats.append({"coin": coin, **s})
                 eq = res.equity_curve
                 combined_equity = eq if combined_equity is None else combined_equity + (eq - 10_000)
-        except:
-            pass
+            else:
+                pair_stats.append({"coin": coin, "total_trades": 0, "winning_trades": 0,
+                                   "win_rate_pct": 0, "profit_factor": 0, "total_return_pct": 0})
+        except Exception as e:
+            pair_stats.append({"coin": coin, "total_trades": 0, "winning_trades": 0,
+                               "win_rate_pct": 0, "profit_factor": 0, "total_return_pct": 0,
+                               "_err": str(e)[:100]})
 
-    if not pair_stats:
-        return html.Div("No trades found.", style={"color": COLORS["red"]}), html.Div()
+    real_stats = [p for p in pair_stats if p.get("total_trades", 0) > 0]
+    if not real_stats:
+        errs = [p.get("_err","no trades") for p in pair_stats]
+        return html.Div(f"No trades found. Errors: {errs}",
+                        style={"color": COLORS["red"]}), html.Div()
 
-    total_trades = sum(int(p["total_trades"]) for p in pair_stats)
-    wins  = sum(int(p.get("winning_trades", 0)) for p in pair_stats)
+    total_trades = sum(int(p["total_trades"]) for p in real_stats)
+    wins  = sum(int(p.get("winning_trades", 0)) for p in real_stats)
     wr    = round(wins / total_trades * 100, 1) if total_trades else 0
-    total_ret = sum(float(p["total_return_pct"]) for p in pair_stats)
-    avg_pf = round(sum(float(p["profit_factor"]) for p in pair_stats) / len(pair_stats), 2)
+    total_ret = sum(float(p["total_return_pct"]) for p in real_stats)
+    avg_pf = round(sum(float(p["profit_factor"]) for p in real_stats) / len(real_stats), 2)
 
     # Stat badges
     ret_color = COLORS["green"] if total_ret >= 0 else COLORS["red"]
@@ -405,7 +427,7 @@ def run_portfolio_cb(_, pairs, candles):
 
     # Per-pair table
     per_pair_rows = []
-    for p in pair_stats:
+    for p in real_stats:
         r = float(p["total_return_pct"])
         per_pair_rows.append(html.Tr([
             html.Td(p["coin"], style={"color": COLORS["blue"], "fontWeight": "bold"}),
@@ -428,8 +450,8 @@ def run_portfolio_cb(_, pairs, candles):
         start_cap = 10_000 * len(pairs)
         fig.add_hline(y=start_cap, line_dash="dash", line_color=COLORS["muted"], row=1, col=1)
 
-    coins_p = [p["coin"] for p in pair_stats]
-    rets_p  = [float(p["total_return_pct"]) for p in pair_stats]
+    coins_p = [p["coin"] for p in real_stats]
+    rets_p  = [float(p["total_return_pct"]) for p in real_stats]
     fig.add_trace(go.Bar(x=coins_p, y=rets_p,
                          marker_color=[COLORS["green"] if r >= 0 else COLORS["red"]
                                        for r in rets_p],
@@ -464,7 +486,7 @@ def run_portfolio_cb(_, pairs, candles):
 # ══════════════════════════════════════════════════════════════════════════════
 # LIVE SIGNALS TAB
 # ══════════════════════════════════════════════════════════════════════════════
-def live_layout():
+def live_body():
     return html.Div([
         card([
             html.Div([
@@ -488,7 +510,6 @@ def live_layout():
         html.Div(id="scan-status", style={"color": COLORS["yellow"],
                                            "fontSize": "13px", "marginBottom": "12px"}),
         html.Div(id="live-signals-content"),
-        dcc.Interval(id="auto-scan", interval=60*60*1000, n_intervals=0),
     ])
 
 
@@ -600,7 +621,7 @@ def scan_signals(n_clicks, n_intervals):
 # ══════════════════════════════════════════════════════════════════════════════
 # CHART TAB
 # ══════════════════════════════════════════════════════════════════════════════
-def chart_layout():
+def chart_body():
     return html.Div([
         card([
             html.Div([
